@@ -1,6 +1,8 @@
 use super::{utils::repo, CommitId};
+use crate::sync::stash::get_stashes;
+use crate::CWD;
 use crate::{error::Result, StatusItem, StatusItemType};
-use git2::{Diff, DiffDelta, DiffOptions, Repository};
+use git2::{Diff, DiffDelta, DiffOptions, Oid, Repository};
 use scopetime::scope_time;
 
 /// get all files that are part of a commit
@@ -32,6 +34,18 @@ pub fn get_commit_files(
         None,
         None,
     )?;
+
+    if is_stash_commit(&id.get_oid())? {
+        let commit = repo.find_commit(id.into())?;
+        let untracked_commit = commit.parent_id(2)?;
+
+        let mut untracked_files = get_commit_files(
+            repo_path,
+            CommitId::new(untracked_commit),
+        )?;
+
+        res.append(&mut untracked_files);
+    }
 
     Ok(res)
 }
@@ -66,6 +80,11 @@ pub(crate) fn get_commit_diff(
     )?;
 
     Ok(diff)
+}
+
+fn is_stash_commit(id: &Oid) -> Result<bool> {
+    let stashes = get_stashes(CWD)?;
+    Ok(stashes.contains(id))
 }
 
 #[cfg(test)]
