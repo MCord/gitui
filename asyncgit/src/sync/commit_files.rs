@@ -1,6 +1,5 @@
 use super::{utils::repo, CommitId};
 use crate::sync::stash::get_stashes;
-use crate::CWD;
 use crate::{error::Result, StatusItem, StatusItemType};
 use git2::{Diff, DiffDelta, DiffOptions, Oid, Repository};
 use scopetime::scope_time;
@@ -35,7 +34,7 @@ pub fn get_commit_files(
         None,
     )?;
 
-    if is_stash_commit(&id.get_oid())? {
+    if is_stash_commit(repo_path, &id.get_oid())? {
         let commit = repo.find_commit(id.into())?;
         let untracked_commit = commit.parent_id(2)?;
 
@@ -82,8 +81,8 @@ pub(crate) fn get_commit_diff(
     Ok(diff)
 }
 
-fn is_stash_commit(id: &Oid) -> Result<bool> {
-    let stashes = get_stashes(CWD)?;
+fn is_stash_commit(repo_path: &str, id: &Oid) -> Result<bool> {
+    let stashes = get_stashes(repo_path)?;
     Ok(stashes.contains(id))
 }
 
@@ -93,40 +92,39 @@ mod tests {
     use crate::{
         error::Result,
         sync::{
-            commit, stage_add_file, stash_save, tests::repo_init,
-            CommitId,
+            commit, stage_add_file, stash, stash_save,
+            tests::repo_init, CommitId,
         },
-        StatusItemType,
+        StatusItemType, CWD,
     };
     use std::{fs::File, io::Write, path::Path};
 
     #[test]
-    fn test_smoke() {
+    fn test_smoke() -> Result<()> {
         let file_path = Path::new("file1.txt");
-        let (_td, repo) = repo_init().unwrap();
+        let (_td, repo) = repo_init()?;
         let root = repo.path().parent().unwrap();
         let repo_path = root.as_os_str().to_str().unwrap();
 
-        File::create(&root.join(file_path))
-            .unwrap()
-            .write_all(b"test file1 content")
-            .unwrap();
+        File::create(&root.join(file_path))?
+            .write_all(b"test file1 content")?;
 
-        stage_add_file(repo_path, file_path).unwrap();
+        stage_add_file(repo_path, file_path)?;
 
-        let id = commit(repo_path, "commit msg").unwrap();
+        let id = commit(repo_path, "commit msg")?;
 
-        let diff =
-            get_commit_files(repo_path, CommitId::new(id)).unwrap();
+        let diff = get_commit_files(repo_path, CommitId::new(id))?;
 
         assert_eq!(diff.len(), 1);
         assert_eq!(diff[0].status, StatusItemType::New);
+
+        Ok(())
     }
 
     #[test]
     fn test_stashed_untracked() -> Result<()> {
         let file_path = Path::new("file1.txt");
-        let (_td, repo) = repo_init().unwrap();
+        let (_td, repo) = repo_init()?;
         let root = repo.path().parent().unwrap();
         let repo_path = root.as_os_str().to_str().unwrap();
 
@@ -138,10 +136,10 @@ mod tests {
         //TODO: https://github.com/extrawurst/gitui/issues/130
         // `get_commit_diff` actually needs to merge the regular diff
         // and a third parent diff containing the untracked files
-        let _diff = get_commit_files(repo_path, id)?;
+        let diff = get_commit_files(repo_path, id)?;
 
-        // assert_eq!(diff.len(), 1);
-        // assert_eq!(diff[0].status, StatusItemType::New);
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff[0].status, StatusItemType::New);
 
         Ok(())
     }
